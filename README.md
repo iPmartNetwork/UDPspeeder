@@ -13,7 +13,7 @@ A professional, multi-instance auto-installer and service manager for [UDPspeede
 ### ⚡ Quick Install
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/iPmartNetwork/UDPspeeder/master/UDPspeeder.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/iPmartNetwork/UDPspeeder/master/speederv2.sh)
 ```
 
 ### 🛠 Manual Install
