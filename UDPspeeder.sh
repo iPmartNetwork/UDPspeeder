@@ -1,5 +1,5 @@
 #!/bin/bash
-# Automatic install & setup for speederv2 (UDPspeeder) from official GitHub release
+# UDPspeeder auto-installer (compatible with iPmartNetwork/UDPspeeder releases)
 
 set -e
 
@@ -9,36 +9,48 @@ YELLOW='\033[93m'
 CYAN='\033[96m'
 NC='\033[0m'
 
-# Architecture detection
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)   ARCH_TAG="amd64" ;;
-    i386|i686) ARCH_TAG="x86" ;;
-    aarch64)  ARCH_TAG="arm64" ;;
-    armv7l)   ARCH_TAG="arm" ;;
-    armv6l)   ARCH_TAG="arm" ;;
-    mips)     ARCH_TAG="mips" ;;
-    mipsle)   ARCH_TAG="mipsle" ;;
+    x86_64)   BIN_NAME="speederv2_amd64" ;;
+    i386|i686) BIN_NAME="speederv2_x86" ;;
+    aarch64)  BIN_NAME="speederv2_arm64" ;;
+    armv7l|armv6l) BIN_NAME="speederv2_arm" ;;
+    mips)     BIN_NAME="speederv2_mips" ;;
+    mipsle)   BIN_NAME="speederv2_mipsle" ;;
     *)        echo -e "${RED}Unknown architecture: $ARCH${NC}"; exit 1 ;;
 esac
 
-echo -e "${CYAN}Fetching latest speederv2 release for $ARCH_TAG...${NC}"
+echo -e "${CYAN}Fetching latest UDPspeeder release...${NC}"
 
-# Fetch latest release JSON and find the right binary
-RELEASE_JSON=$(curl -s https://api.github.com/repos/iPmartNetwork/UDPspeeder/releases/latest)
-DOWNLOAD_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "$ARCH_TAG" | grep -v ".tar.gz" | cut -d '"' -f 4 | head -n1)
+REPO="iPmartNetwork/UDPspeeder"
+RELEASE_JSON=$(curl -s https://api.github.com/repos/${REPO}/releases/latest)
+ASSET_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "speederv2_binaries.tar.gz" | cut -d '"' -f 4)
 
-if [ -z "$DOWNLOAD_URL" ]; then
-    echo -e "${RED}Could not find a suitable binary for architecture: $ARCH_TAG${NC}"
+if [ -z "$ASSET_URL" ]; then
+    echo -e "${RED}Could not find speederv2_binaries.tar.gz in the latest release!${NC}"
     exit 1
 fi
 
-echo -e "${YELLOW}Downloading: $DOWNLOAD_URL${NC}"
-curl -L -o speederv2 "$DOWNLOAD_URL"
-chmod +x speederv2
-sudo mv speederv2 /usr/local/bin/speederv2
+WORKDIR=$(mktemp -d)
+cd "$WORKDIR"
 
-echo -e "${GREEN}speederv2 installed to /usr/local/bin/speederv2!${NC}"
+echo -e "${YELLOW}Downloading binaries: $ASSET_URL${NC}"
+curl -L -o speederv2_binaries.tar.gz "$ASSET_URL"
+
+tar -xzf speederv2_binaries.tar.gz
+
+if [ ! -f "$BIN_NAME" ]; then
+    echo -e "${RED}Binary for your architecture ($BIN_NAME) not found!${NC}"
+    exit 1
+fi
+
+chmod +x "$BIN_NAME"
+sudo mv "$BIN_NAME" /usr/local/bin/speederv2
+
+cd /
+rm -rf "$WORKDIR"
+
+echo -e "${GREEN}speederv2 binary installed to /usr/local/bin/speederv2${NC}"
 
 # === Create systemd service ===
 
