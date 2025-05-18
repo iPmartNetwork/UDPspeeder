@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Colors
+# Color codes
 RED='\e[91m'
 GREEN='\e[92m'
 YELLOW='\e[93m'
@@ -82,7 +82,8 @@ start_udpspeeder() {
         echo -e "${RED}UDPspeeder not installed!${NC}"
         return
     fi
-    read -p "$(echo -e ${YELLOW}Enter speederv2 parameters (e.g. -l0.0.0.0:4096 -r127.0.0.1:1080 -f20:10 -k passwd):${NC} ) " PARAMS
+    echo -ne "${YELLOW}Enter speederv2 parameters (e.g. -l0.0.0.0:4096 -r127.0.0.1:1080 -f20:10 -k passwd):${NC} "
+    read PARAMS
     nohup "$UDPSPEEDER_PATH" $PARAMS > /var/log/udpspeeder.log 2>&1 &
     sleep 1
     pgrep -f "$UDPSPEEDER_PATH" >/dev/null && echo -e "${GREEN}UDPspeeder started!${NC}" || echo -e "${RED}Failed to start!${NC}"
@@ -98,6 +99,7 @@ status_udpspeeder() {
     else
         echo -e "${YELLOW}UDPspeeder is not running.${NC}"
     fi
+    read -n1 -r -p "Press any key to continue..."
 }
 
 create_service() {
@@ -105,7 +107,8 @@ create_service() {
         echo -e "${RED}UDPspeeder not installed!${NC}"
         return
     fi
-    read -p "$(echo -e ${YELLOW}Enter speederv2 parameters for service (e.g. -l0.0.0.0:4096 -r127.0.0.1:1080 -f20:10 -k passwd):${NC} ) " PARAMS
+    echo -ne "${YELLOW}Enter speederv2 parameters for service (e.g. -l0.0.0.0:4096 -r127.0.0.1:1080 -f20:10 -k passwd):${NC} "
+    read PARAMS
     cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=UDPspeeder Service
@@ -151,7 +154,7 @@ while true; do
         2) uninstall_udpspeeder ;;
         3) start_udpspeeder ;;
         4) stop_udpspeeder ;;
-        5) status_udpspeeder; read -n1 -r -p "Press any key to continue..." ;;
+        5) status_udpspeeder ;;
         6) create_service ;;
         7) remove_service ;;
         0) exit 0 ;;
