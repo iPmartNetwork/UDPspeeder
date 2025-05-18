@@ -1,4 +1,4 @@
-# UDPspeeder Pro  | اسکریپت نصب و مدیریت حرفه‌ای UDPspeeder
+# UDPspeeder Pro  | اسکریپت نصب و مدیریت حرفه‌ای
 
 [![GitHub stars](https://img.shields.io/github/stars/iPmartNetwork/UDPspeeder?style=social)](https://github.com/iPmartNetwork/UDPspeeder)
 [![GitHub license](https://img.shields.io/github/license/iPmartNetwork/UDPspeeder)](https://github.com/iPmartNetwork/UDPspeeder/blob/master/LICENSE)
