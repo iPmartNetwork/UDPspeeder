@@ -1,175 +1,107 @@
 #!/bin/bash
+# Automatic install & setup for speederv2 (UDPspeeder) from official GitHub release
 
-# Colors
-RED='\e[91m'
-GREEN='\e[92m'
-YELLOW='\e[93m'
-CYAN='\e[96m'
-NC='\e[0m'
+set -e
 
-UDPSPEEDER_PATH="/usr/local/bin/speederv2"
-SERVICE_PATH="/etc/systemd/system/udpspeeder.service"
+RED='\033[91m'
+GREEN='\033[92m'
+YELLOW='\033[93m'
+CYAN='\033[96m'
+NC='\033[0m'
+
+# Architecture detection
 ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)   ARCH_TAG="amd64" ;;
+    i386|i686) ARCH_TAG="x86" ;;
+    aarch64)  ARCH_TAG="arm64" ;;
+    armv7l)   ARCH_TAG="arm" ;;
+    armv6l)   ARCH_TAG="arm" ;;
+    mips)     ARCH_TAG="mips" ;;
+    mipsle)   ARCH_TAG="mipsle" ;;
+    *)        echo -e "${RED}Unknown architecture: $ARCH${NC}"; exit 1 ;;
+esac
 
-# Set your default UDPspeeder params here!
-DEFAULT_PARAMS="-l0.0.0.0:4096 -r127.0.0.1:1080 -f20:10 -k passwd"
+echo -e "${CYAN}Fetching latest speederv2 release for $ARCH_TAG...${NC}"
 
-# Detect system architecture
-detect_arch() {
-    case "$ARCH" in
-        x86_64)   BIN_NAME="speederv2_amd64" ;;
-        i386|i686) BIN_NAME="speederv2_x86" ;;
-        armv7l|armv6l) BIN_NAME="speederv2_arm" ;;
-        aarch64)  BIN_NAME="speederv2_arm64" ;;
-        mips)     BIN_NAME="speederv2_mips" ;;
-        mipsle)   BIN_NAME="speederv2_mipsle" ;;
-        s390x)    BIN_NAME="speederv2_s390x" ;;
-        ppc64le)  BIN_NAME="speederv2_ppc64le" ;;
-        *) echo -e "${RED}Unsupported architecture: $ARCH${NC}"; exit 1 ;;
-    esac
-}
+# Fetch latest release JSON and find the right binary
+RELEASE_JSON=$(curl -s https://api.github.com/repos/wangyu-/UDPspeeder/releases/latest)
+DOWNLOAD_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "$ARCH_TAG" | grep -v ".tar.gz" | cut -d '"' -f 4 | head -n1)
 
-# Root check
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}Please run this script as root.${NC}"
+if [ -z "$DOWNLOAD_URL" ]; then
+    echo -e "${RED}Could not find a suitable binary for architecture: $ARCH_TAG${NC}"
     exit 1
 fi
 
-# Detect package manager
-if command -v apt-get &>/dev/null; then
-    PKG="apt-get"
-elif command -v yum &>/dev/null; then
-    PKG="yum"
+echo -e "${YELLOW}Downloading: $DOWNLOAD_URL${NC}"
+curl -L -o speederv2 "$DOWNLOAD_URL"
+chmod +x speederv2
+sudo mv speederv2 /usr/local/bin/speederv2
+
+echo -e "${GREEN}speederv2 installed to /usr/local/bin/speederv2!${NC}"
+
+# === Create systemd service ===
+
+echo -e "${CYAN}\n--- Configure speederv2 as a systemd service ---${NC}"
+echo "Select run mode:"
+echo "1) Server"
+echo "2) Client"
+read -rp "Your choice (1/2): " MODE
+
+if [[ "$MODE" == "1" ]]; then
+    read -rp "Listen port (e.g. 4096): " LISTEN_PORT
+    read -rp "Local UDP (WireGuard/OpenVPN) port (e.g. 51820): " WG_PORT
+    read -rp "Password: " PASSWD
+    read -rp "Mode (0/1, default 1): " SPD_MODE
+    SPD_MODE=${SPD_MODE:-1}
+    read -rp "Timeout (default 1): " TIMEOUT
+    TIMEOUT=${TIMEOUT:-1}
+    read -rp "MTU (default 1250): " MTU
+    MTU=${MTU:-1250}
+    read -rp "Enable FEC? (yes/no, default yes): " FEC
+    FEC=${FEC,,}
+    [[ "$FEC" == "no" ]] && FEC_OPT="--disable-fec" || FEC_OPT="-f20:10"
+    SERVICE_CMD="/usr/local/bin/speederv2 -s -l0.0.0.0:${LISTEN_PORT} --mode ${SPD_MODE} --timeout ${TIMEOUT} --mtu ${MTU} -r127.0.0.1:${WG_PORT} ${FEC_OPT} -k \"${PASSWD}\""
+elif [[ "$MODE" == "2" ]]; then
+    read -rp "Local UDP port (e.g. 51820): " WG_PORT
+    read -rp "Server public IP: " SERVER_IP
+    read -rp "Server speederv2 port (e.g. 4096): " SERVER_PORT
+    read -rp "Password: " PASSWD
+    read -rp "Mode (0/1, default 1): " SPD_MODE
+    SPD_MODE=${SPD_MODE:-1}
+    read -rp "Timeout (default 1): " TIMEOUT
+    TIMEOUT=${TIMEOUT:-1}
+    read -rp "MTU (default 1250): " MTU
+    MTU=${MTU:-1250}
+    read -rp "Enable FEC? (yes/no, default yes): " FEC
+    FEC=${FEC,,}
+    [[ "$FEC" == "no" ]] && FEC_OPT="--disable-fec" || FEC_OPT="-f20:10"
+    SERVICE_CMD="/usr/local/bin/speederv2 -c -l0.0.0.0:${WG_PORT} -r${SERVER_IP}:${SERVER_PORT} --mode ${SPD_MODE} --timeout ${TIMEOUT} --mtu ${MTU} ${FEC_OPT} -k \"${PASSWD}\""
 else
-    echo -e "${RED}Supported package manager not found (apt-get or yum).${NC}"
-    exit 1
+    echo -e "${RED}Invalid selection!${NC}"
+    exit 2
 fi
 
-install_udpspeeder() {
-    detect_arch
-    $PKG update -y && $PKG install wget curl tar -y
-    echo -e "${CYAN}Fetching latest UDPspeeder version...${NC}"
-    LATEST_VER=$(curl -s https://api.github.com/repos/wangyu-/UDPspeeder/releases/latest | grep 'tag_name' | head -n1 | cut -d\" -f4)
-    if [[ -z "$LATEST_VER" ]]; then
-        echo -e "${RED}Failed to fetch the latest version!${NC}"
-        exit 1
-    fi
-    echo -e "${CYAN}Downloading UDPspeeder $LATEST_VER for $BIN_NAME...${NC}"
-    TMP_DIR=$(mktemp -d)
-    wget -q --show-progress --https-only -O "$TMP_DIR/udpspeeder.tar.gz" "https://github.com/wangyu-/UDPspeeder/releases/download/$LATEST_VER/speederv2_binaries.tar.gz"
-    if [[ $? -ne 0 ]]; then
-        echo -e "${RED}Download failed!${NC}"
-        rm -rf "$TMP_DIR"
-        exit 1
-    fi
-    tar -xzf "$TMP_DIR/udpspeeder.tar.gz" -C "$TMP_DIR"
-    if [[ ! -f "$TMP_DIR/$BIN_NAME" ]]; then
-        echo -e "${RED}Binary for your architecture not found!${NC}"
-        rm -rf "$TMP_DIR"
-        exit 1
-    fi
-    mv -f "$TMP_DIR/$BIN_NAME" "$UDPSPEEDER_PATH"
-    chmod +x "$UDPSPEEDER_PATH"
-    rm -rf "$TMP_DIR"
-    echo -e "${GREEN}UDPspeeder installed successfully! Command: speederv2 --help${NC}"
-}
+echo -e "${CYAN}Creating systemd service...${NC}"
 
-uninstall_udpspeeder() {
-    systemctl stop udpspeeder 2>/dev/null
-    rm -f "$UDPSPEEDER_PATH" "$SERVICE_PATH"
-    systemctl daemon-reload
-    echo -e "${GREEN}UDPspeeder and its service have been removed.${NC}"
-}
-
-# *** AUTO MODE: Start UDPspeeder with DEFAULT_PARAMS ***
-start_udpspeeder() {
-    if [[ ! -f "$UDPSPEEDER_PATH" ]]; then
-        echo -e "${RED}UDPspeeder is not installed!${NC}"
-        return
-    fi
-    echo -e "${YELLOW}Starting UDPspeeder with params:${NC} $DEFAULT_PARAMS"
-    nohup "$UDPSPEEDER_PATH" $DEFAULT_PARAMS > /var/log/udpspeeder.log 2>&1 &
-    sleep 1
-    if pgrep -f "$UDPSPEEDER_PATH" >/dev/null; then
-        echo -e "${GREEN}UDPspeeder started!${NC}"
-    else
-        echo -e "${RED}Failed to start!${NC}"
-    fi
-}
-
-stop_udpspeeder() {
-    if pkill -f "$UDPSPEEDER_PATH"; then
-        echo -e "${GREEN}UDPspeeder stopped.${NC}"
-    else
-        echo -e "${YELLOW}UDPspeeder was not running.${NC}"
-    fi
-}
-
-status_udpspeeder() {
-    if pgrep -f "$UDPSPEEDER_PATH" >/dev/null; then
-        echo -e "${GREEN}UDPspeeder is running.${NC}"
-    else
-        echo -e "${YELLOW}UDPspeeder is not running.${NC}"
-    fi
-    read -n1 -r -p "Press any key to continue..."
-}
-
-create_service() {
-    if [[ ! -f "$UDPSPEEDER_PATH" ]]; then
-        echo -e "${RED}UDPspeeder is not installed!${NC}"
-        return
-    fi
-    echo -ne "${YELLOW}Enter speederv2 parameters for the service:${NC} "
-    read PARAMS
-    cat > "$SERVICE_PATH" <<EOF
+sudo tee /etc/systemd/system/speederv2.service > /dev/null <<EOF
 [Unit]
-Description=UDPspeeder Service
+Description=UDPspeeder (speederv2) Service
 After=network.target
 
 [Service]
-Type=simple
-ExecStart=$UDPSPEEDER_PATH $PARAMS
-Restart=on-failure
+ExecStart=${SERVICE_CMD}
+Restart=always
+User=root
+LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable udpspeeder
-    systemctl restart udpspeeder
-    echo -e "${GREEN}UDPspeeder service created and started.${NC}"
-}
 
-remove_service() {
-    systemctl stop udpspeeder 2>/dev/null
-    systemctl disable udpspeeder 2>/dev/null
-    rm -f "$SERVICE_PATH"
-    systemctl daemon-reload
-    echo -e "${GREEN}UDPspeeder systemd service removed.${NC}"
-}
+sudo systemctl daemon-reload
+sudo systemctl enable speederv2
+sudo systemctl restart speederv2
 
-while true; do
-    clear
-    echo -e "${CYAN}==================== UDPspeeder Manager ====================${NC}"
-    echo -e "${YELLOW}1) Install UDPspeeder"
-    echo -e "2) Uninstall UDPspeeder"
-    echo -e "3) Start UDPspeeder (manual/auto)"
-    echo -e "4) Stop UDPspeeder"
-    echo -e "5) Status"
-    echo -e "6) Create systemd service (autostart)"
-    echo -e "7) Remove systemd service"
-    echo -e "0) Exit${NC}"
-    echo
-    read -p "Select an option [0-7]: " OPTION
-    case $OPTION in
-        1) install_udpspeeder ;;
-        2) uninstall_udpspeeder ;;
-        3) start_udpspeeder ;;
-        4) stop_udpspeeder ;;
-        5) status_udpspeeder ;;
-        6) create_service ;;
-        7) remove_service ;;
-        0) exit 0 ;;
-        *) echo -e "${RED}Invalid option!${NC}"; sleep 1 ;;
-    esac
-done
+echo -e "${GREEN}speederv2 systemd service is now active!${NC}"
+echo -e "${YELLOW}Check status: sudo systemctl status speederv2${NC}"
