@@ -25,7 +25,7 @@ esac
 echo -e "${CYAN}Fetching latest speederv2 release for $ARCH_TAG...${NC}"
 
 # Fetch latest release JSON and find the right binary
-RELEASE_JSON=$(curl -s https://api.github.com/repos/wangyu-/UDPspeeder/releases/latest)
+RELEASE_JSON=$(curl -s https://api.github.com/repos/iPmartNetwork/UDPspeeder/releases/latest)
 DOWNLOAD_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "$ARCH_TAG" | grep -v ".tar.gz" | cut -d '"' -f 4 | head -n1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
