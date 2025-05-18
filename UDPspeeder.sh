@@ -1,118 +1,77 @@
 #!/bin/bash
-# Pro UDPspeeder installer & manager (multi-instance, advanced menu)
-set -e
+# UDPSpeeder Professional Manager by iPmart
+# Multi-Arch, Systemd Service, Quick Run
 
-# Colors
-RED='\033[91m'
-GREEN='\033[92m'
-YELLOW='\033[93m'
-CYAN='\033[96m'
-NC='\033[0m'
+RED='\e[91m'; GREEN='\e[92m'; YELLOW='\e[93m'; BLUE='\e[94m'; CYAN='\e[96m'; NC='\e[0m'
 
-# Arch detection
-ARCH=$(uname -m)
-case "$ARCH" in
-    x86_64)   BIN_NAME="speederv2_amd64" ;;
-    i386|i686) BIN_NAME="speederv2_x86" ;;
-    aarch64)  BIN_NAME="speederv2_arm64" ;;
-    armv7l|armv6l) BIN_NAME="speederv2_arm" ;;
-    mips)     BIN_NAME="speederv2_mips" ;;
-    mipsle)   BIN_NAME="speederv2_mipsle" ;;
-    *) echo -e "${RED}Unknown architecture: $ARCH${NC}"; exit 1 ;;
-esac
-
-UDPSPEEDER_BIN="/usr/local/bin/speederv2"
-REPO="iPmartNetwork/UDPspeeder"
-
-# Root check
-if [[ $EUID -ne 0 ]]; then
+if [[ $(id -u) -ne 0 ]]; then
     echo -e "${RED}Please run this script as root.${NC}"; exit 1
 fi
 
-# Dependency check/install
-for pkg in curl tar grep awk lsof systemctl; do
-    if ! command -v $pkg &>/dev/null; then
-        echo -e "${YELLOW}Installing missing dependency: $pkg${NC}"
-        if command -v apt &>/dev/null; then
-            apt update -y && apt install -y $pkg
-        elif command -v yum &>/dev/null; then
-            yum install -y $pkg
-        else
-            echo -e "${RED}Supported package manager not found (apt or yum).${NC}"
-            exit 1
-        fi
-    fi
-done
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)   BIN="speederv2_amd64";;
+    i386|i686) BIN="speederv2_x86";;
+    aarch64)  BIN="speederv2_arm64";;
+    armv7l)   BIN="speederv2_arm";;
+    *) echo -e "${RED}Your architecture is not supported!${NC}"; exit 1;;
+esac
 
-# Download & install speederv2
-install_udpspeeder() {
-    echo -e "${CYAN}Fetching latest UDPspeeder release...${NC}"
-    RELEASE_JSON=$(curl -s https://api.github.com/repos/${REPO}/releases/latest)
-    ASSET_URL=$(echo "$RELEASE_JSON" | grep "browser_download_url" | grep "speederv2_binaries.tar.gz" | cut -d '"' -f 4)
-    if [ -z "$ASSET_URL" ]; then
-        echo -e "${RED}Could not find speederv2_binaries.tar.gz in the latest release!${NC}"
+download_speederv2() {
+    echo -e "${BLUE}Fetching the latest speederv2 from iPmartNetwork...${NC}"
+    apt-get update -y &>/dev/null
+    apt-get install wget curl -y &>/dev/null
+    VER=$(curl -s https://api.github.com/repos/iPmartNetwork/UDPRAW-V2/releases/latest | grep tag_name | cut -d\" -f4)
+    if [[ -z "$VER" ]]; then
+        echo -e "${RED}Could not fetch latest version tag!${NC}"
         exit 1
     fi
-
-    WORKDIR=$(mktemp -d)
-    cd "$WORKDIR"
-    echo -e "${YELLOW}Downloading binaries: $ASSET_URL${NC}"
-    curl -L -o speederv2_binaries.tar.gz "$ASSET_URL"
-    tar -xzf speederv2_binaries.tar.gz
-    if [ ! -f "$BIN_NAME" ]; then
-        echo -e "${RED}Binary for your architecture ($BIN_NAME) not found!${NC}"; exit 1
-    fi
-    chmod +x "$BIN_NAME"
-    mv "$BIN_NAME" "$UDPSPEEDER_BIN"
-    cd / && rm -rf "$WORKDIR"
-    echo -e "${GREEN}speederv2 installed to $UDPSPEEDER_BIN${NC}"
+    FILE="$BIN"
+    URL="https://github.com/iPmartNetwork/UDPRAW-V2/releases/download/${VER}/${FILE}"
+    wget -O /usr/bin/speederv2 "$URL" || { echo -e "${RED}Download failed!${NC}"; exit 1; }
+    chmod +x /usr/bin/speederv2
+    echo -e "${GREEN}speederv2 $VER installed/updated successfully!${NC}"
 }
 
-# Port in use?
-check_port() {
-    lsof -i UDP:"$1" -n | grep LISTEN || true
-}
-
-# Create/manage multi-instance services
 create_service() {
-    read -rp "Instance name (no spaces, e.g. udp1): " NAME
-    if [[ -z "$NAME" ]]; then echo -e "${RED}Instance name required.${NC}"; return; fi
-    read -rp "Mode (1=Server, 2=Client): " MODE
-    if [[ "$MODE" == "1" ]]; then
-        read -rp "Listen port (UDP): " LISTEN_PORT
-        check_port "$LISTEN_PORT" && echo -e "${RED}Port $LISTEN_PORT already in use!${NC}" && return
-        read -rp "Forward to local port (UDP, e.g. 51820): " WG_PORT
-        read -rp "Password: " PASSWD
-        read -rp "Mode (0/1, default 1): " SPD_MODE; SPD_MODE=${SPD_MODE:-1}
-        read -rp "Timeout (default 1): " TIMEOUT; TIMEOUT=${TIMEOUT:-1}
-        read -rp "MTU (default 1250): " MTU; MTU=${MTU:-1250}
-        read -rp "Enable FEC? (yes/no, default yes): " FEC; FEC=${FEC,,}
-        [[ "$FEC" == "no" ]] && FEC_OPT="--disable-fec" || FEC_OPT="-f20:10"
-        SERVICE_CMD="$UDPSPEEDER_BIN -s -l0.0.0.0:${LISTEN_PORT} --mode ${SPD_MODE} --timeout ${TIMEOUT} --mtu ${MTU} -r127.0.0.1:${WG_PORT} ${FEC_OPT} -k \"${PASSWD}\""
-    elif [[ "$MODE" == "2" ]]; then
-        read -rp "Local UDP port: " WG_PORT
-        check_port "$WG_PORT" && echo -e "${RED}Port $WG_PORT already in use!${NC}" && return
-        read -rp "Server public IP: " SERVER_IP
-        read -rp "Server speederv2 port: " SERVER_PORT
-        read -rp "Password: " PASSWD
-        read -rp "Mode (0/1, default 1): " SPD_MODE; SPD_MODE=${SPD_MODE:-1}
-        read -rp "Timeout (default 1): " TIMEOUT; TIMEOUT=${TIMEOUT:-1}
-        read -rp "MTU (default 1250): " MTU; MTU=${MTU:-1250}
-        read -rp "Enable FEC? (yes/no, default yes): " FEC; FEC=${FEC,,}
-        [[ "$FEC" == "no" ]] && FEC_OPT="--disable-fec" || FEC_OPT="-f20:10"
-        SERVICE_CMD="$UDPSPEEDER_BIN -c -l0.0.0.0:${WG_PORT} -r${SERVER_IP}:${SERVER_PORT} --mode ${SPD_MODE} --timeout ${TIMEOUT} --mtu ${MTU} ${FEC_OPT} -k \"${PASSWD}\""
+    echo -e "${YELLOW}=== Create a new speederv2 systemd service ===${NC}"
+    read -p "Service name (e.g. udps1): " SVCNAME
+    read -p "Role (server/client) [s/c]: " ROLE
+    if [[ $ROLE == "s" || $ROLE == "S" ]]; then
+        MODE="-s"
+        read -p "Listen port (e.g. 40000): " PORT
+        read -p "Forward to (e.g. 127.0.0.1:51820): " DEST
+        read -p "Tunnel password: " PASS
+        read -p "FEC option (e.g. -f20:10 or --disable-fec): " FEC
+        read -p "Timeout (default 1): " TIMEOUT
+        read -p "MTU (default 1250): " MTU
+        read -p "Mode (0/1) [default 1]: " UMODE
+        [[ -z "$TIMEOUT" ]] && TIMEOUT=1
+        [[ -z "$MTU" ]] && MTU=1250
+        [[ -z "$UMODE" ]] && UMODE=1
+        EXEC="/usr/bin/speederv2 $MODE -l0.0.0.0:$PORT -r$DEST -k \"$PASS\" --mode $UMODE --timeout $TIMEOUT --mtu $MTU $FEC"
     else
-        echo -e "${RED}Invalid selection!${NC}"; return
+        MODE="-c"
+        read -p "Local port to listen (e.g. 51820): " LOCAL
+        read -p "Server IP:Port (e.g. 1.2.3.4:40000): " REMOTE
+        read -p "Tunnel password: " PASS
+        read -p "FEC option (e.g. -f20:10 or --disable-fec): " FEC
+        read -p "Timeout (default 1): " TIMEOUT
+        read -p "MTU (default 1250): " MTU
+        read -p "Mode (0/1) [default 1]: " UMODE
+        [[ -z "$TIMEOUT" ]] && TIMEOUT=1
+        [[ -z "$MTU" ]] && MTU=1250
+        [[ -z "$UMODE" ]] && UMODE=1
+        EXEC="/usr/bin/speederv2 $MODE -l0.0.0.0:$LOCAL -r$REMOTE -k \"$PASS\" --mode $UMODE --timeout $TIMEOUT --mtu $MTU $FEC"
     fi
 
-    SERVICE_FILE="/etc/systemd/system/speederv2-${NAME}.service"
-    sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+    cat > /etc/systemd/system/speederv2-$SVCNAME.service <<EOF
 [Unit]
-Description=UDPspeeder Service ($NAME)
+Description=speederv2 Tunnel Service ($SVCNAME)
 After=network.target
 
 [Service]
-ExecStart=${SERVICE_CMD}
+ExecStart=$EXEC
 Restart=always
 User=root
 LimitNOFILE=1048576
@@ -120,69 +79,90 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable speederv2-"$NAME"
-    sudo systemctl restart speederv2-"$NAME"
-    echo -e "${GREEN}Service speederv2-${NAME} started and enabled.${NC}"
+
+    systemctl daemon-reload
+    systemctl enable --now speederv2-$SVCNAME
+    echo -e "${GREEN}Service speederv2-$SVCNAME created and started.${NC}"
 }
 
-list_services() {
-    echo -e "${CYAN}Active UDPspeeder Instances:${NC}"
-    systemctl list-units --type=service --all | grep speederv2- | awk '{print $1, $4}'
+delete_service() {
+    read -p "Service name to delete: " SVCNAME
+    systemctl stop speederv2-$SVCNAME
+    systemctl disable speederv2-$SVCNAME
+    rm -f /etc/systemd/system/speederv2-$SVCNAME.service
+    systemctl daemon-reload
+    echo -e "${YELLOW}Service speederv2-$SVCNAME deleted.${NC}"
 }
 
-service_status() {
-    read -rp "Instance name: " NAME
-    sudo systemctl status speederv2-"$NAME"
+show_services() {
+    echo -e "${CYAN}==== speederv2 systemd services ====${NC}"
+    systemctl list-units --type=service | grep speederv2 || echo "No speederv2 services running."
+    echo
+    read -p "Press Enter to continue..."
 }
 
-show_logs() {
-    read -rp "Instance name: " NAME
-    sudo journalctl -u speederv2-"$NAME" --no-pager -n 50
+uninstall_speederv2() {
+    rm -f /usr/bin/speederv2
+    echo -e "${YELLOW}speederv2 binary deleted.${NC}"
 }
 
-remove_service() {
-    read -rp "Instance name to remove: " NAME
-    sudo systemctl stop speederv2-"$NAME" || true
-    sudo systemctl disable speederv2-"$NAME" || true
-    sudo rm -f /etc/systemd/system/speederv2-"$NAME".service
-    sudo systemctl daemon-reload
-    echo -e "${GREEN}Removed service speederv2-${NAME}${NC}"
+run_tunnel() {
+    echo -e "${YELLOW}=== Quick Run speederv2 Tunnel ===${NC}"
+    read -p "Role (server/client) [s/c]: " ROLE
+    if [[ $ROLE == "s" || $ROLE == "S" ]]; then
+        MODE="-s"
+        read -p "Listen port (e.g. 40000): " PORT
+        read -p "Forward to (e.g. 127.0.0.1:51820): " DEST
+        read -p "Tunnel password: " PASS
+        read -p "FEC option (e.g. -f20:10 or --disable-fec): " FEC
+        read -p "Timeout (default 1): " TIMEOUT
+        read -p "MTU (default 1250): " MTU
+        read -p "Mode (0/1) [default 1]: " UMODE
+        [[ -z "$TIMEOUT" ]] && TIMEOUT=1
+        [[ -z "$MTU" ]] && MTU=1250
+        [[ -z "$UMODE" ]] && UMODE=1
+        echo -e "${CYAN}Running speederv2 server...${NC}"
+        echo -e "${GREEN}Command:${NC} speederv2 $MODE -l0.0.0.0:$PORT -r$DEST -k \"$PASS\" --mode $UMODE --timeout $TIMEOUT --mtu $MTU $FEC"
+        /usr/bin/speederv2 $MODE -l0.0.0.0:$PORT -r$DEST -k "$PASS" --mode $UMODE --timeout $TIMEOUT --mtu $MTU $FEC
+    else
+        MODE="-c"
+        read -p "Local port to listen (e.g. 51820): " LOCAL
+        read -p "Server IP:Port (e.g. 1.2.3.4:40000): " REMOTE
+        read -p "Tunnel password: " PASS
+        read -p "FEC option (e.g. -f20:10 or --disable-fec): " FEC
+        read -p "Timeout (default 1): " TIMEOUT
+        read -p "MTU (default 1250): " MTU
+        read -p "Mode (0/1) [default 1]: " UMODE
+        [[ -z "$TIMEOUT" ]] && TIMEOUT=1
+        [[ -z "$MTU" ]] && MTU=1250
+        [[ -z "$UMODE" ]] && UMODE=1
+        echo -e "${CYAN}Running speederv2 client...${NC}"
+        echo -e "${GREEN}Command:${NC} speederv2 $MODE -l0.0.0.0:$LOCAL -r$REMOTE -k \"$PASS\" --mode $UMODE --timeout $TIMEOUT --mtu $MTU $FEC"
+        /usr/bin/speederv2 $MODE -l0.0.0.0:$LOCAL -r$REMOTE -k "$PASS" --mode $UMODE --timeout $TIMEOUT --mtu $MTU $FEC
+    fi
 }
 
-uninstall_udpspeeder() {
-    sudo pkill -f "$UDPSPEEDER_BIN" || true
-    sudo rm -f "$UDPSPEEDER_BIN"
-    sudo systemctl daemon-reload
-    echo -e "${GREEN}UDPspeeder uninstalled.${NC}"
-}
-
-main_menu() {
-    while true; do
-        clear
-        echo -e "${CYAN}====== Pro UDPspeeder Manager ======${NC}"
-        echo -e "${YELLOW}1) Install/Update UDPspeeder"
-        echo -e "2) Create new UDPspeeder instance"
-        echo -e "3) List UDPspeeder instances"
-        echo -e "4) Show service status"
-        echo -e "5) Show service logs"
-        echo -e "6) Remove UDPspeeder instance"
-        echo -e "7) Uninstall UDPspeeder"
-        echo -e "0) Exit${NC}"
-        echo
-        read -p "Select an option [0-7]: " opt
-        case $opt in
-            1) install_udpspeeder ;;
-            2) create_service ;;
-            3) list_services; read -n1 -r -p "Press any key..." ;;
-            4) service_status; read -n1 -r -p "Press any key..." ;;
-            5) show_logs; read -n1 -r -p "Press any key..." ;;
-            6) remove_service ;;
-            7) uninstall_udpspeeder ;;
-            0) exit 0 ;;
-            *) echo -e "${RED}Invalid option!${NC}"; sleep 1 ;;
-        esac
-    done
-}
-
-main_menu
+while true; do
+    clear
+    echo -e "${BLUE}=============================================="
+    echo -e "        speederv2 (UDPSpeeder) Manager"
+    echo -e "==============================================${NC}"
+    echo -e "${GREEN}1) Install/Update speederv2"
+    echo -e "2) Uninstall speederv2"
+    echo -e "3) Create speederv2 systemd service"
+    echo -e "4) Delete speederv2 systemd service"
+    echo -e "5) Show all speederv2 services"
+    echo -e "6) Run a tunnel (quick, not as service)"
+    echo -e "7) Exit${NC}"
+    read -p "Select an option [1-7]: " CH
+    case "$CH" in
+        1) download_speederv2;;
+        2) uninstall_speederv2;;
+        3) create_service;;
+        4) delete_service;;
+        5) show_services;;
+        6) run_tunnel;;
+        7) exit 0;;
+        *) echo -e "${RED}Invalid selection!${NC}"; sleep 1;;
+    esac
+done
