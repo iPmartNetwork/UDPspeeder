@@ -11,6 +11,9 @@ UDPSPEEDER_PATH="/usr/local/bin/speederv2"
 SERVICE_PATH="/etc/systemd/system/udpspeeder.service"
 ARCH=$(uname -m)
 
+# Set your default UDPspeeder params here!
+DEFAULT_PARAMS="-l0.0.0.0:4096 -r127.0.0.1:1080 -f20:10 -k passwd"
+
 # Detect system architecture
 detect_arch() {
     case "$ARCH" in
@@ -78,14 +81,14 @@ uninstall_udpspeeder() {
     echo -e "${GREEN}UDPspeeder and its service have been removed.${NC}"
 }
 
+# *** AUTO MODE: Start UDPspeeder with DEFAULT_PARAMS ***
 start_udpspeeder() {
     if [[ ! -f "$UDPSPEEDER_PATH" ]]; then
         echo -e "${RED}UDPspeeder is not installed!${NC}"
         return
     fi
-    echo -ne "${YELLOW}Enter speederv2 parameters (e.g. -l0.0.0.0:4096 -r127.0.0.1:1080 -f20:10 -k passwd):${NC} "
-    read PARAMS
-    nohup "$UDPSPEEDER_PATH" $PARAMS > /var/log/udpspeeder.log 2>&1 &
+    echo -e "${YELLOW}Starting UDPspeeder with params:${NC} $DEFAULT_PARAMS"
+    nohup "$UDPSPEEDER_PATH" $DEFAULT_PARAMS > /var/log/udpspeeder.log 2>&1 &
     sleep 1
     if pgrep -f "$UDPSPEEDER_PATH" >/dev/null; then
         echo -e "${GREEN}UDPspeeder started!${NC}"
@@ -150,7 +153,7 @@ while true; do
     echo -e "${CYAN}==================== UDPspeeder Manager ====================${NC}"
     echo -e "${YELLOW}1) Install UDPspeeder"
     echo -e "2) Uninstall UDPspeeder"
-    echo -e "3) Start UDPspeeder (manual)"
+    echo -e "3) Start UDPspeeder (manual/auto)"
     echo -e "4) Stop UDPspeeder"
     echo -e "5) Status"
     echo -e "6) Create systemd service (autostart)"
